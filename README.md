@@ -5,11 +5,12 @@
   <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker">
     <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/latest_tag?color=%2310a6cb&ignore=sha*.sig%2Clatest&label=tag&trim=" alt="Latest Tag" />
   </a>
-  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker/?tag=latest">
-    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/size?color=%2310a6cb&tag=latest&label=size&trim=" alt="Image size">
-  </a>
   <a href="https://github.com/UbioZur/nanobot-docker/blob/master/LICENSE">
     <img src="https://img.shields.io/github/license/UbioZur/nanobot-docker" alt="License">
+  </a>
+  <br />
+  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker/?tag=latest">
+    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/size?color=%2310a6cb&tag=latest&label=size&trim=" alt="Image size">
   </a>
 </p>
 
