@@ -1,23 +1,28 @@
 <p align="center">
-  <img src="https://raw.githubusercontent.com/HKUDS/nanobot/main/images/readme-cover-light.svg" alt="nanobot" width="160">
+  <a href="https://github.com/UbioZur/nanobot-docker/actions/workflows/build.yml">
+    <img src="https://github.com/UbioZur/nanobot-docker/actions/workflows/build.yml/badge.svg" alt="Build">
+  </a>
+  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker">
+    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/latest_tag?color=%2310a6cb&ignore=sha*.sig%2Clatest&label=tag&trim=" alt="Latest Tag" />
+  </a>
+  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker/?tag=latest">
+    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/size?color=%2310a6cb&tag=latest&label=size&trim=" alt="Image size">
+  </a>
+  <a href="https://github.com/UbioZur/nanobot-docker/blob/master/LICENSE">
+    <img src="https://img.shields.io/github/license/UbioZur/nanobot-docker" alt="License">
+  </a>
 </p>
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="./images/readme-cover-dark.svg">
+  <img alt="nanobot README cover" src="./images/readme-cover-light.svg">
+</picture>
 
 <h1 align="center">Nanobot Docker</h1>
 
 <p align="center">
   My continuously built, signed Docker image of
   <a href="https://github.com/HKUDS/nanobot">HKUDS/nanobot</a>.
-</p>
-
-<p align="center">
-  <a href="https://github.com/UbioZur/nanobot-docker/actions/workflows/build.yml">
-    <img src="https://github.com/UbioZur/nanobot-docker/actions/workflows/build.yml/badge.svg" alt="Build">
-  </a>
-  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker">
-    <img src="https://img.shields.io/badge/ghcr.io-image-blue?logo=docker" alt="GHCR">
-  </a>
-  <img src="https://img.shields.io/docker/image-size/ubiozur/nanobot-docker/latest?sort=date&logo=docker" alt="Image size">
-  <img src="https://img.shields.io/github/license/UbioZur/nanobot-docker" alt="License">
 </p>
 
 ---
