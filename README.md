@@ -2,15 +2,15 @@
   <a href="https://github.com/UbioZur/nanobot-docker/actions/workflows/build.yml">
     <img src="https://github.com/UbioZur/nanobot-docker/actions/workflows/build.yml/badge.svg" alt="Build">
   </a>
-  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker">
-    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/latest_tag?color=%2310a6cb&ignore=sha*.sig%2Clatest&label=tag&trim=" alt="Latest Tag" />
+  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker/?tag=latest">
+    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/tags?color=%2344cc11&ignore=sha*&n=3&label=latest&trim=" alt="Latest Tags">
   </a>
-  <a href="https://github.com/UbioZur/nanobot-docker/blob/master/LICENSE">
-    <img src="https://img.shields.io/github/license/UbioZur/nanobot-docker" alt="License">
+  <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker/?tag=latest">
+    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/size?color=%2344cc11&tag=latest&label=image+size&trim=" alt="Image size">
   </a>
   <br />
   <a href="https://github.com/UbioZur/nanobot-docker/pkgs/container/nanobot-docker/?tag=latest">
-    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/size?color=%2310a6cb&tag=latest&label=size&trim=" alt="Image size">
+    <img src="https://ghcr-badge.egpl.dev/ubiozur/nanobot-docker/latest_tag?color=%2344cc11&ignore=latest&label=sha256&trim=" alt="Latest Sha" />
   </a>
 </p>
 
