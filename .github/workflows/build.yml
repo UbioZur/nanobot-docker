@@ -12,6 +12,12 @@ on:
         required: false
         type: string
 
+      test_change:
+        description: "TEST: simulate a Dockerfile change and create the notification issue"
+        required: false
+        default: false
+        type: boolean
+
 env:
   REGISTRY: ghcr.io
   IMAGE_NAME: ${{ github.repository }}
@@ -25,14 +31,23 @@ jobs:
       contents: read
       packages: write
       id-token: write
+      issues: write
 
     steps:
+      # ------------------------------------------------------------
+      # Authentication
+      # ------------------------------------------------------------
+
       - name: Log in to GHCR
         uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      # ------------------------------------------------------------
+      # Determine upstream tag
+      # ------------------------------------------------------------
 
       - name: Determine upstream tag
         id: upstream
@@ -57,6 +72,10 @@ jobs:
           echo "Upstream tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      # ------------------------------------------------------------
+      # Determine whether this tag already has an image
+      # ------------------------------------------------------------
+
       - name: Docker metadata
         id: meta
         uses: docker/metadata-action@v6
@@ -65,13 +84,25 @@ jobs:
           tags: |
             type=raw,value=${{ steps.upstream.outputs.tag }}
 
+      - name: Get image name
+        id: image-name
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+          IMAGE="${IMAGE%:*}"
+
+          echo "Image: $IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
       - name: Check whether image exists
         id: image
         shell: bash
         run: |
           set -euo pipefail
 
-          IMAGE="${{ steps.meta.outputs.tags }}"
+          IMAGE="${{ steps.image-name.outputs.image }}:${{ steps.upstream.outputs.tag }}"
 
           echo "Checking $IMAGE"
 
@@ -83,17 +114,30 @@ jobs:
             echo "exists=false" >> "$GITHUB_OUTPUT"
           fi
 
+      # ------------------------------------------------------------
+      # Decide whether this workflow should do anything
+      # ------------------------------------------------------------
+
       - name: Decide whether to build
         id: decision
         shell: bash
         run: |
+          set -euo pipefail
+
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
-          elif [ "${{ steps.image.outputs.exists }}" = "false" ]; then
+            exit 0
+          fi
+
+          if [ "${{ steps.image.outputs.exists }}" = "false" ]; then
             echo "build=true" >> "$GITHUB_OUTPUT"
           else
             echo "build=false" >> "$GITHUB_OUTPUT"
           fi
+
+      # ------------------------------------------------------------
+      # Checkout upstream
+      # ------------------------------------------------------------
 
       - name: Checkout upstream nanobot
         if: steps.decision.outputs.build == 'true'
@@ -103,9 +147,238 @@ jobs:
           ref: ${{ steps.upstream.outputs.tag }}
           path: nanobot
 
+      # ------------------------------------------------------------
+      # Find previous upstream tag
+      # ------------------------------------------------------------
+
+      - name: Determine previous upstream tag
+        if: steps.decision.outputs.build == 'true'
+        id: previous
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CURRENT="${{ steps.upstream.outputs.tag }}"
+
+          TAGS=$(git ls-remote --tags --refs "$UPSTREAM_REPO" \
+            | sed 's#^.*/##' \
+            | sort -V)
+
+          PREVIOUS=$(printf '%s\n' "$TAGS" \
+            | awk -v current="$CURRENT" '
+                $0 == current { found=1; next }
+                found { print; exit }
+              ')
+
+          echo "Current tag:  $CURRENT"
+          echo "Previous tag: ${PREVIOUS:-none}"
+
+          echo "tag=$PREVIOUS" >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------
+      # Checkout previous upstream tag
+      # ------------------------------------------------------------
+
+      - name: Checkout previous nanobot tag
+        if: steps.decision.outputs.build == 'true' && steps.previous.outputs.tag != ''
+        uses: actions/checkout@v6
+        with:
+          repository: HKUDS/nanobot
+          ref: ${{ steps.previous.outputs.tag }}
+          path: nanobot-previous
+
+      # ------------------------------------------------------------
+      # Compare Dockerfile and docker-compose.yml
+      # ------------------------------------------------------------
+
+      - name: Check upstream build files
+        if: steps.decision.outputs.build == 'true'
+        id: changes
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          CURRENT="nanobot"
+          PREVIOUS="nanobot-previous"
+
+          CHANGE_FOUND=false
+          DIFF_FILE="$RUNNER_TEMP/upstream-build-files.diff"
+
+          : > "$DIFF_FILE"
+
+          if [ -z "${{ steps.previous.outputs.tag }}" ]; then
+            echo "No previous upstream tag available."
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          for FILE in Dockerfile docker-compose.yml; do
+            echo "Checking $FILE"
+
+            CURRENT_FILE="$CURRENT/$FILE"
+            PREVIOUS_FILE="$PREVIOUS/$FILE"
+
+            if [ -f "$CURRENT_FILE" ] && [ -f "$PREVIOUS_FILE" ]; then
+              if ! diff -u \
+                  --label "${{ steps.previous.outputs.tag }}/$FILE" \
+                  --label "${{ steps.upstream.outputs.tag }}/$FILE" \
+                  "$PREVIOUS_FILE" "$CURRENT_FILE" >> "$DIFF_FILE"; then
+                CHANGE_FOUND=true
+              fi
+
+            elif [ -f "$CURRENT_FILE" ]; then
+              CHANGE_FOUND=true
+
+              {
+                echo "--- /dev/null"
+                echo "+++ ${{ steps.upstream.outputs.tag }}/$FILE"
+                echo
+                cat "$CURRENT_FILE"
+              } >> "$DIFF_FILE"
+
+            elif [ -f "$PREVIOUS_FILE" ]; then
+              CHANGE_FOUND=true
+
+              {
+                echo "--- ${{ steps.previous.outputs.tag }}/$FILE"
+                echo "+++ /dev/null"
+                echo
+                cat "$PREVIOUS_FILE"
+              } >> "$DIFF_FILE"
+            fi
+          done
+
+          echo "Changes detected: $CHANGE_FOUND"
+          echo "changed=$CHANGE_FOUND" >> "$GITHUB_OUTPUT"
+
+          if [ "$CHANGE_FOUND" = "true" ]; then
+            {
+              echo 'diff<<EOF'
+              cat "$DIFF_FILE"
+              echo 'EOF'
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # ------------------------------------------------------------
+      # TEST MODE
+      #
+      # This creates a dummy change without touching upstream.
+      # It allows us to test the notification mechanism immediately.
+      # ------------------------------------------------------------
+
+      - name: Simulate Dockerfile change
+        if: steps.decision.outputs.build == 'true' && github.event_name == 'workflow_dispatch' && inputs.test_change == true
+        id: test-change
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          DIFF_FILE="$RUNNER_TEMP/upstream-build-files.diff"
+
+          {
+            echo '--- previous-tag/Dockerfile'
+            echo '+++ current-tag/Dockerfile'
+            echo '@@ -1,3 +1,5 @@'
+            echo ' FROM python:3.12-slim'
+            echo ' '
+            echo '+# TEST CHANGE'
+            echo '+# This is a simulated upstream Dockerfile change.'
+          } > "$DIFF_FILE"
+
+          echo "changed=true" >> "$GITHUB_OUTPUT"
+
+          {
+            echo 'diff<<EOF'
+            cat "$DIFF_FILE"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      # ------------------------------------------------------------
+      # Create notification issue
+      # ------------------------------------------------------------
+
+      - name: Create upstream build-file change issue
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          (
+            steps.changes.outputs.changed == 'true' ||
+            steps.test-change.outputs.changed == 'true'
+          )
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          DIFF: ${{ steps.test-change.outputs.diff || steps.changes.outputs.diff }}
+          CURRENT_TAG: ${{ steps.upstream.outputs.tag }}
+          PREVIOUS_TAG: ${{ steps.previous.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ "${{ inputs.test_change }}" = "true" ]; then
+            TITLE="TEST: upstream nanobot build files changed"
+          else
+            TITLE="Review upstream nanobot build file changes: ${CURRENT_TAG}"
+          fi
+
+          {
+            echo "@UbioZur"
+            echo
+            echo "## Upstream nanobot build files changed"
+            echo
+            echo "A change was detected in one or both of the files we use to build the container:"
+            echo
+            echo "- \`Dockerfile\`"
+            echo "- \`docker-compose.yml\`"
+            echo
+            echo "**Previous tag:** ${PREVIOUS_TAG:-none}"
+            echo "**New tag:** ${CURRENT_TAG}"
+            echo
+            echo "Please review the changes before accepting the new upstream build."
+            echo
+            echo "### Changes"
+            echo
+            echo '```diff'
+            echo "$DIFF"
+            echo '```'
+            echo
+            echo "This issue was created automatically by GitHub Actions."
+          } > "$RUNNER_TEMP/issue-body.md"
+
+          gh issue create \
+            --repo "$GH_REPO" \
+            --title "$TITLE" \
+            --assignee "UbioZur" \
+            --body-file "$RUNNER_TEMP/issue-body.md"
+
+      # ------------------------------------------------------------
+      # Stop automatic build if build files changed
+      #
+      # Manual runs without test_change are allowed to proceed after
+      # the notification check.
+      # ------------------------------------------------------------
+
+      - name: Stop automatic build after build-file change
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          github.event_name == 'schedule' &&
+          steps.changes.outputs.changed == 'true'
+        run: |
+          echo "Upstream Dockerfile and/or docker-compose.yml changed."
+          echo "An issue was created for manual review."
+          exit 1
+
+      # ------------------------------------------------------------
+      # Build
+      # ------------------------------------------------------------
+
       - name: Build and push image
         id: build
-        if: steps.decision.outputs.build == 'true'
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          !(
+            github.event_name == 'workflow_dispatch' &&
+            inputs.test_change == true
+          )
         uses: docker/build-push-action@v7
         with:
           context: ./nanobot
@@ -115,28 +388,43 @@ jobs:
             NANOBOT_CHANNELS=
           tags: ${{ steps.meta.outputs.tags }}
 
+      # ------------------------------------------------------------
+      # Sign
+      # ------------------------------------------------------------
+
       - name: Install Cosign
-        if: steps.decision.outputs.build == 'true'
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          !(
+            github.event_name == 'workflow_dispatch' &&
+            inputs.test_change == true
+          )
         uses: sigstore/cosign-installer@v4.0.0
 
-      - name: Get image name
-        id: image-name
-        shell: bash
-        run: |
-          IMAGE=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
-          IMAGE="${IMAGE%:*}"
-          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
-
       - name: Sign image
-        if: steps.decision.outputs.build == 'true'
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          !(
+            github.event_name == 'workflow_dispatch' &&
+            inputs.test_change == true
+          )
         env:
           IMAGE: ${{ steps.image-name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign sign --yes "${IMAGE}@${DIGEST}"
 
+      # ------------------------------------------------------------
+      # Verify signature
+      # ------------------------------------------------------------
+
       - name: Verify image
-        if: steps.decision.outputs.build == 'true'
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          !(
+            github.event_name == 'workflow_dispatch' &&
+            inputs.test_change == true
+          )
         env:
           IMAGE: ${{ steps.image-name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
@@ -145,8 +433,27 @@ jobs:
             --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/build.yml@refs/heads/master" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 
+      # ------------------------------------------------------------
+      # Update latest
+      #
+      # Only:
+      #   - weekly latest upstream build
+      #   - manual run with no tag specified
+      #
+      # Manual historical-tag builds do NOT move latest.
+      # ------------------------------------------------------------
+
       - name: Update latest tag
-        if: steps.decision.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.tag == '')
+        if: >
+          steps.decision.outputs.build == 'true' &&
+          !(
+            github.event_name == 'workflow_dispatch' &&
+            inputs.test_change == true
+          ) &&
+          (
+            github.event_name == 'schedule' ||
+            inputs.tag == ''
+          )
         env:
           IMAGE: ${{ steps.image-name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
