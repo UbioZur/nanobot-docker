@@ -28,7 +28,7 @@ jobs:
 
     steps:
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -57,13 +57,23 @@ jobs:
           echo "Upstream tag: $TAG"
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
 
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=${{ steps.upstream.outputs.tag }}
+
       - name: Check whether image exists
         id: image
         shell: bash
         run: |
           set -euo pipefail
 
-          IMAGE="${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.tag }}"
+          IMAGE="${{ steps.meta.outputs.tags }}"
+
+          echo "Checking $IMAGE"
 
           if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
             echo "Image already exists: $IMAGE"
@@ -103,8 +113,7 @@ jobs:
           push: true
           build-args: |
             NANOBOT_CHANNELS=
-          tags: |
-            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.tag }}
+          tags: ${{ steps.meta.outputs.tags }}
 
       - name: Install Cosign
         if: steps.decision.outputs.build == 'true'
@@ -113,7 +122,7 @@ jobs:
       - name: Sign image
         if: steps.decision.outputs.build == 'true'
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign sign --yes "${IMAGE}@${DIGEST}"
@@ -121,7 +130,7 @@ jobs:
       - name: Verify image
         if: steps.decision.outputs.build == 'true'
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign verify "${IMAGE}@${DIGEST}" \
@@ -131,10 +140,9 @@ jobs:
       - name: Update latest tag
         if: steps.decision.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.tag == '')
         env:
-          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          IMAGE: ${{ steps.meta.outputs.tags }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           docker buildx imagetools create \
-            --tag "${IMAGE}:latest" \
+            --tag "${{ env.REGISTRY }}/${{ github.repository }}:latest" \
             "${IMAGE}@${DIGEST}"
-            
