@@ -119,10 +119,18 @@ jobs:
         if: steps.decision.outputs.build == 'true'
         uses: sigstore/cosign-installer@v4.0.0
 
+      - name: Get image name
+        id: image-name
+        shell: bash
+        run: |
+          IMAGE=$(echo "${{ steps.meta.outputs.tags }}" | head -n 1)
+          IMAGE="${IMAGE%:*}"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
       - name: Sign image
         if: steps.decision.outputs.build == 'true'
         env:
-          IMAGE: ${{ steps.meta.outputs.tags }}
+          IMAGE: ${{ steps.image-name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign sign --yes "${IMAGE}@${DIGEST}"
@@ -130,19 +138,19 @@ jobs:
       - name: Verify image
         if: steps.decision.outputs.build == 'true'
         env:
-          IMAGE: ${{ steps.meta.outputs.tags }}
+          IMAGE: ${{ steps.image-name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           cosign verify "${IMAGE}@${DIGEST}" \
-            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/build.yml@refs/heads/main" \
+            --certificate-identity="https://github.com/${{ github.repository }}/.github/workflows/build.yml@refs/heads/master" \
             --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
 
       - name: Update latest tag
         if: steps.decision.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.tag == '')
         env:
-          IMAGE: ${{ steps.meta.outputs.tags }}
+          IMAGE: ${{ steps.image-name.outputs.image }}
           DIGEST: ${{ steps.build.outputs.digest }}
         run: |
           docker buildx imagetools create \
-            --tag "${{ env.REGISTRY }}/${{ github.repository }}:latest" \
+            --tag "${IMAGE}:latest" \
             "${IMAGE}@${DIGEST}"
