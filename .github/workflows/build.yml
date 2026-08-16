@@ -1,0 +1,140 @@
+name: Build nanobot
+
+on:
+  schedule:
+    # Every Sunday at 03:00 UTC
+    - cron: "0 3 * * 0"
+
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Upstream nanobot tag to build (leave empty for latest)"
+        required: false
+        type: string
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME: ${{ github.repository }}
+  UPSTREAM_REPO: https://github.com/HKUDS/nanobot.git
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      packages: write
+      id-token: write
+
+    steps:
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Determine upstream tag
+        id: upstream
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG=$(git ls-remote --tags --refs "$UPSTREAM_REPO" \
+              | sed 's#^.*/##' \
+              | sort -V \
+              | tail -n 1)
+          fi
+
+          if [ -z "$TAG" ]; then
+            echo "Could not determine upstream tag"
+            exit 1
+          fi
+
+          echo "Upstream tag: $TAG"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+
+      - name: Check whether image exists
+        id: image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          IMAGE="${REGISTRY}/${IMAGE_NAME}:${{ steps.upstream.outputs.tag }}"
+
+          if docker manifest inspect "$IMAGE" >/dev/null 2>&1; then
+            echo "Image already exists: $IMAGE"
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Image does not exist: $IMAGE"
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Decide whether to build
+        id: decision
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          elif [ "${{ steps.image.outputs.exists }}" = "false" ]; then
+            echo "build=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "build=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Checkout upstream nanobot
+        if: steps.decision.outputs.build == 'true'
+        uses: actions/checkout@v6
+        with:
+          repository: HKUDS/nanobot
+          ref: ${{ steps.upstream.outputs.tag }}
+          path: nanobot
+
+      - name: Build and push image
+        id: build
+        if: steps.decision.outputs.build == 'true'
+        uses: docker/build-push-action@v7
+        with:
+          context: ./nanobot
+          file: ./nanobot/Dockerfile
+          push: true
+          build-args: |
+            NANOBOT_CHANNELS=
+          tags: |
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}:${{ steps.upstream.outputs.tag }}
+
+      - name: Install Cosign
+        if: steps.decision.outputs.build == 'true'
+        uses: sigstore/cosign-installer@v4.0.0
+
+      - name: Sign image
+        if: steps.decision.outputs.build == 'true'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+      - name: Verify image
+        if: steps.decision.outputs.build == 'true'
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign verify "${IMAGE}@${DIGEST}" \
+            --certificate-identity-regexp="https://github.com/${{ github.repository }}/.github/workflows/build.yml@refs/heads/main" \
+            --certificate-oidc-issuer="https://token.actions.githubusercontent.com"
+
+      - name: Update latest tag
+        if: steps.decision.outputs.build == 'true' && (github.event_name == 'schedule' || inputs.tag == '')
+        env:
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          docker buildx imagetools create \
+            --tag "${IMAGE}:latest" \
+            "${IMAGE}@${DIGEST}"
+            
