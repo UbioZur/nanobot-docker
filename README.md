@@ -15,8 +15,8 @@
 </p>
 
 <picture>
-  <source media="(prefers-color-scheme: dark)" srcset="./images/readme-cover-dark.svg">
-  <img alt="nanobot README cover" src="./images/readme-cover-light.svg">
+  <source media="(prefers-color-scheme: dark)" srcset="https://github.com/HKUDS/nanobot/raw/main/images/readme-cover-dark.svg">
+  <img alt="nanobot README cover" src="https://github.com/HKUDS/nanobot/raw/main/images/readme-cover-light.svg">
 </picture>
 
 <h1 align="center">Nanobot Docker</h1>
